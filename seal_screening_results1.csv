@@ -1,0 +1,13 @@
+seal,total_frames,two_hand_frames,pass_rate,verdict
+Boar,44,16,36%,FAIL
+Bird,48,2,4%,FAIL
+Tiger,47,0,0%,FAIL
+Ram,44,0,0%,FAIL
+Serpent,46,0,0%,FAIL
+Dragon,47,1,2%,FAIL
+Dog,44,36,82%,PASS
+Horse,49,38,78%,FAIL
+Monkey,46,0,0%,FAIL
+Ox,44,6,14%,FAIL
+Hare,49,7,14%,FAIL
+Rat,47,36,77%,FAIL
