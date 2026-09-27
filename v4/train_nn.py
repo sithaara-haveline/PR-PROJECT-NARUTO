@@ -1,52 +1,45 @@
 import json
+import os
 import joblib
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from torch.utils.data import DataLoader, TensorDataset
 
-# 1. Load Dataset
-df = pd.read_csv("hand_seal_dataset.csv")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(SCRIPT_DIR, "hand_seal_dataset.csv")
 
+# Load Dataset
+df = pd.read_csv(CSV_PATH)
 feature_cols = [
     c for c in df.columns if c.startswith("L_") or c.startswith("R_")
 ]
+
 X_raw = df[feature_cols].values
 y_raw = df["seal"].values
 
+# Presence Flags
+has_l = (X_raw[:, 3] != 0).astype(np.float32).reshape(-1, 1)
+has_r = (X_raw[:, 66] != 0).astype(np.float32).reshape(-1, 1)
+X_augmented = np.hstack([X_raw, has_l, has_r])
 
-def add_presence_features(X_matrix):
-    has_l = (X_matrix[:, 3] != 0).astype(np.float32).reshape(-1, 1)
-    has_r = (X_matrix[:, 66] != 0).astype(np.float32).reshape(-1, 1)
-    return np.hstack([X_matrix, has_l, has_r])
-
-
-X_augmented = add_presence_features(X_raw)
-
-# Label Encoding
+# Encode & Scale
 label_encoder = LabelEncoder()
 y_encoded = label_encoder.fit_transform(y_raw)
 
-# 2. Sequential Block Split (Prevents adjacent video frame leakage)
-# Take 80% chunk per class for training, last 20% chunk for testing
-train_idx, test_idx = [], []
-for c in np.unique(y_encoded):
-    c_indices = np.where(y_encoded == c)[0]
-    split_pt = int(len(c_indices) * 0.8)
-    train_idx.extend(c_indices[:split_pt])
-    test_idx.extend(c_indices[split_pt:])
-
-X_train, X_test = X_augmented[train_idx], X_augmented[test_idx]
-y_train, y_test = y_encoded[train_idx], y_encoded[test_idx]
-
 scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+X_scaled = scaler.fit_transform(X_augmented)
+
+# DataLoader for proper BatchNorm statistics
+X_tensor = torch.FloatTensor(X_scaled)
+y_tensor = torch.LongTensor(y_encoded)
+dataset = TensorDataset(X_tensor, y_tensor)
+loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
 
-# 3. Model with Heavy Regularization
+# Neural Network Model
 class HandSealNN(nn.Module):
 
     def __init__(self, input_dim, num_classes):
@@ -55,11 +48,11 @@ class HandSealNN(nn.Module):
             nn.Linear(input_dim, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Dropout(0.5),  # Increased dropout
+            nn.Dropout(0.3),
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.4),
+            nn.Dropout(0.2),
             nn.Linear(64, num_classes),
         )
 
@@ -67,61 +60,41 @@ class HandSealNN(nn.Module):
         return self.net(x)
 
 
-input_dim = X_train_scaled.shape[1]
 num_classes = len(label_encoder.classes_)
+input_dim = X_scaled.shape[1]
 
 model = HandSealNN(input_dim, num_classes)
 criterion = nn.CrossEntropyLoss()
-# Added weight_decay (L2 regularization) to penalize memorization
-optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
 
-X_train_t = torch.FloatTensor(X_train_scaled)
-y_train_t = torch.LongTensor(y_train)
-X_test_t = torch.FloatTensor(X_test_scaled)
-y_test_t = torch.LongTensor(y_test)
-
-print("Training Regularized Neural Network...")
-epochs = 120
-
-for epoch in range(epochs):
+# Training Loop
+print("Training Neural Network with Mini-Batches...")
+epochs = 60
+for epoch in range(1, epochs + 1):
     model.train()
+    total_loss = 0.0
+    for bx, by in loader:
+        optimizer.zero_grad()
+        outputs = model(bx)
+        loss = criterion(outputs, by)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
 
-    # Add Gaussian Noise Augmentation to Training Features
-    noise = torch.randn_like(X_train_t) * 0.05
-    noisy_X_train = X_train_t + noise
+    if epoch % 10 == 0:
+        print(f"Epoch [{epoch}/{epochs}] | Loss: {total_loss/len(loader):.4f}")
 
-    optimizer.zero_grad()
-    outputs = model(noisy_X_train)
-    loss = criterion(outputs, y_train_t)
-    loss.backward()
-    optimizer.step()
-
-    if (epoch + 1) % 20 == 0:
-        model.eval()
-        with torch.no_grad():
-            test_outputs = model(X_test_t)
-            test_loss = criterion(test_outputs, y_test_t).item()
-            acc = (
-                (test_outputs.argmax(dim=1) == y_test_t)
-                .float()
-                .mean()
-                .item()
-            )
-            print(
-                f"Epoch [{epoch+1}/{epochs}] | Train Loss: {loss.item():.4f} | Test Loss: {test_loss:.4f} | Test Acc: {acc*100:.2f}%"
-            )
-
-# Save artifacts
-torch.save(model.state_dict(), "seal_nn_model.pth")
-joblib.dump(scaler, "nn_scaler.pkl")
-joblib.dump(label_encoder, "label_encoder.pkl")
+# Save Model & Artifacts
+torch.save(model.state_dict(), os.path.join(SCRIPT_DIR, "seal_nn_model.pth"))
+joblib.dump(scaler, os.path.join(SCRIPT_DIR, "nn_scaler.pkl"))
+joblib.dump(label_encoder, os.path.join(SCRIPT_DIR, "label_encoder.pkl"))
 
 metadata = {
-    "feature_columns": feature_cols,
-    "classes": list(label_encoder.classes_),
     "input_dim": input_dim,
+    "feature_columns": feature_cols,
+    "classes": label_encoder.classes_.tolist(),
 }
-with open("nn_metadata.json", "w") as f:
-    json.dump(metadata, f)
+with open(os.path.join(SCRIPT_DIR, "nn_metadata.json"), "w") as f:
+    json.dump(metadata, f, indent=4)
 
-print("Model successfully trained with block splitting & noise augmentation!")
+print("\nRetraining complete! Model saved successfully.")

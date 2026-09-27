@@ -8,7 +8,7 @@ import numpy as np
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
-SEAL_NAME = "Normal/Neutral"  # Update for each seal
+SEAL_NAME = "Dragon"  # Update for each seal
 OUTPUT_CSV = "hand_seal_dataset.csv"
 FRAMES_PER_CONDITION = 25
 PREP_SECONDS = 5

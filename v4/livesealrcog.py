@@ -4,45 +4,62 @@ import cv2
 import joblib
 import mediapipe as mp
 import numpy as np
+import torch
+import torch.nn as nn
 
-# ---- 1. Load Saved Model & Metadata ----
+
+class HandSealNN(nn.Module):
+
+    def __init__(self, input_dim, num_classes):
+        super(HandSealNN, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(64, num_classes),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-MODEL_PATH = os.path.join(SCRIPT_DIR, "best_seal_model.pkl")
-SCALER_PATH = os.path.join(SCRIPT_DIR, "scaler.pkl")
-PCA_PATH = os.path.join(SCRIPT_DIR, "pca.pkl")
-METADATA_PATH = os.path.join(SCRIPT_DIR, "model_metadata.json")
-
-print("Loading saved model and preprocessing tools...")
-model = joblib.load(MODEL_PATH)
-scaler = joblib.load(SCALER_PATH)
-
-with open(METADATA_PATH, "r") as f:
+with open(os.path.join(SCRIPT_DIR, "nn_metadata.json"), "r") as f:
     metadata = json.load(f)
 
-use_pca = metadata.get("use_pca", False)
-pca = joblib.load(PCA_PATH) if use_pca and os.path.exists(PCA_PATH) else None
-expected_cols = metadata.get("feature_columns", [])
+scaler = joblib.load(os.path.join(SCRIPT_DIR, "nn_scaler.pkl"))
+label_encoder = joblib.load(os.path.join(SCRIPT_DIR, "label_encoder.pkl"))
+expected_cols = metadata["feature_columns"]
 
-print(f"Model loaded successfully! Expecting {len(expected_cols)} features.")
+model = HandSealNN(metadata["input_dim"], len(metadata["classes"]))
+model.load_state_dict(
+    torch.load(
+        os.path.join(SCRIPT_DIR, "seal_nn_model.pth"), weights_only=True
+    )
+)
+model.eval()
 
 
-# ---- 2. Normalization Function ----
 def extract_normalized_features(hand_landmarks):
     coords = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark])
     wrist = coords[0]
     relative = coords - wrist
-    dist = np.linalg.norm(relative[9])  # Distance to landmark 9 (Middle MCP)
 
+    dist = np.linalg.norm(relative[9])
     if dist > 0:
         normalized = relative / dist
     else:
         normalized = relative
 
-    return normalized.flatten()  # 63 features
+    return normalized.flatten()
 
 
-# ---- 3. Initialize MediaPipe Hands ----
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
@@ -50,14 +67,12 @@ mp_drawing_styles = mp.solutions.drawing_styles
 hands = mp_hands.Hands(
     static_image_mode=False,
     max_num_hands=2,
-    min_detection_confidence=0.6,
-    min_tracking_confidence=0.6,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5,
 )
 
-# ---- 4. Start Video Stream ----
 cap = cv2.VideoCapture(0)
-
-print("\nStarting camera... Press 'q' to quit.")
+print("\nStarting Live Recognition...")
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -69,84 +84,93 @@ while cap.isOpened():
     results = hands.process(rgb_frame)
 
     current_seal = "No Hands Detected"
-    confidence_text = ""
+    conf_str = ""
 
-    if results.multi_hand_landmarks and results.multi_handedness:
+    if results.multi_hand_landmarks:
+        sorted_hands = sorted(
+            results.multi_hand_landmarks, key=lambda lm: lm.landmark[0].x
+        )
+
         feature_dict = {}
+        has_l, has_r = 0.0, 0.0
 
-        for hand_landmarks, handedness in zip(
-            results.multi_hand_landmarks, results.multi_handedness
-        ):
-            # Draw skeleton on screen
+        if len(sorted_hands) == 1:
+            wrist_x = sorted_hands[0].landmark[0].x
+            prefix = "L_" if wrist_x < 0.5 else "R_"
+            if prefix == "L_":
+                has_l = 1.0
+            else:
+                has_r = 1.0
+
+            flat = extract_normalized_features(sorted_hands[0])
+            for idx, val in enumerate(flat):
+                feature_dict[f"{prefix}{idx}"] = val
+
             mp_drawing.draw_landmarks(
                 frame,
-                hand_landmarks,
+                sorted_hands[0],
                 mp_hands.HAND_CONNECTIONS,
                 mp_drawing_styles.get_default_hand_landmarks_style(),
                 mp_drawing_styles.get_default_hand_connections_style(),
             )
 
-            # Determine Hand Prefix: L_ or R_
-            hand_label = handedness.classification[0].label  # 'Left' or 'Right'
-            prefix = "L_" if hand_label == "Left" else "R_"
+        elif len(sorted_hands) >= 2:
+            has_l, has_r = 1.0, 1.0
+            for prefix, hand_lm in zip(["L_", "R_"], sorted_hands[:2]):
+                flat = extract_normalized_features(hand_lm)
+                for idx, val in enumerate(flat):
+                    feature_dict[f"{prefix}{idx}"] = val
 
-            # Normalize 21 3D points -> 63 float values
-            flat_63 = extract_normalized_features(hand_landmarks)
+                mp_drawing.draw_landmarks(
+                    frame,
+                    hand_lm,
+                    mp_hands.HAND_CONNECTIONS,
+                    mp_drawing_styles.get_default_hand_landmarks_style(),
+                    mp_drawing_styles.get_default_hand_connections_style(),
+                )
 
-            # Assign to dictionary keys L_0..L_62 / R_0..R_62
-            for idx, val in enumerate(flat_63):
-                feature_dict[f"{prefix}{idx}"] = val
+        vec = [feature_dict.get(col, 0.0) for col in expected_cols]
+        vec.extend([has_l, has_r])
 
-        # Fill feature vector matching CSV header
-        feature_vector = [feature_dict.get(col, 0.0) for col in expected_cols]
-        feature_array = np.array(feature_vector).reshape(1, -1)
+        scaled_vec = scaler.transform([vec])
 
-        # Scale & PCA Transform
-        scaled_features = scaler.transform(feature_array)
-        final_features = (
-            pca.transform(scaled_features)
-            if use_pca and pca is not None
-            else scaled_features
-        )
+        with torch.no_grad():
+            tensor_in = torch.FloatTensor(scaled_vec)
+            logits = model(tensor_in)
+            probs = torch.softmax(logits, dim=1)
+            conf, pred = torch.max(probs, dim=1)
 
-        # Predict Seal
-        prediction = model.predict(final_features)[0]
+            pct = conf.item() * 100
+            pred_name = label_encoder.inverse_transform([pred.item()])[0]
 
-        if hasattr(model, "predict_proba"):
-            probs = model.predict_proba(final_features)
-            confidence = np.max(probs) * 100
-            current_seal = f"{prediction}"
-            confidence_text = f"{confidence:.1f}%"
-        else:
-            current_seal = f"{prediction}"
+            if pct > 40:
+                current_seal = pred_name
+            else:
+                current_seal = f"Unsure ({pred_name})"
+            conf_str = f"{pct:.1f}%"
 
-    # Visual UI Overlay
-    cv2.rectangle(frame, (10, 10), (450, 90), (0, 0, 0), -1)
+    cv2.rectangle(frame, (10, 10), (420, 85), (0, 0, 0), -1)
     cv2.putText(
         frame,
         f"Seal: {current_seal}",
-        (25, 50),
+        (20, 45),
         cv2.FONT_HERSHEY_SIMPLEX,
-        1.0,
+        0.8,
         (0, 255, 0),
         2,
-        cv2.LINE_AA,
     )
-
-    if confidence_text:
+    if conf_str:
         cv2.putText(
             frame,
-            f"Confidence: {confidence_text}",
-            (25, 80),
+            f"Confidence: {conf_str}",
+            (20, 72),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
+            0.55,
             (255, 255, 255),
             1,
-            cv2.LINE_AA,
         )
 
-    cv2.imshow("Real-Time Hand Seal Recognition", frame)
-
+    cv2.imshow("Hand Seal Recognition", frame)
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
