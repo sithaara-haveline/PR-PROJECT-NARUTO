@@ -1,0 +1,8 @@
+__pycache__/
+.vscode/
+*.pkl
+*.pth
+screens/
+model_metadata.json
+confusion_matrix_*.png
+*.zip
