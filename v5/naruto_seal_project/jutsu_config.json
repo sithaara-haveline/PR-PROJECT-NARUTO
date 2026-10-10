@@ -21,13 +21,13 @@
   "jutsu": [
     {
       "name": "Fireball Jutsu",
-      "seals": ["Ram", "Horse", "Boar"],
+      "seals": ["Tiger", "Horse", "Boar"],
       "theme": "fire"
     },
     {
       "name": "Shadow Clone Jutsu",
       "seals": ["Special Cross Seal"],
-      "theme": "smoke_clone"
+      "theme": "multi_clone"
     },
     {
       "name": "Rasengan",
@@ -37,7 +37,12 @@
     {
       "name": "Reaper Death Seal",
       "seals": ["Boar", "Tiger", "Hare", "Horse"],
-      "theme": "dark"
+      "theme": "reaper"
+    },
+    {
+      "name": "Chidori",
+      "seals": ["Tiger", "Hare", "Boar"],
+      "theme": "chidori"
     }
   ]
 }

@@ -1,0 +1,18 @@
+{
+  "model": "Neural Network (MLP)",
+  "classes": [
+    "Boar",
+    "Cast",
+    "Dog",
+    "Hare",
+    "Horse",
+    "Normal/Neutral",
+    "Ram",
+    "Rat",
+    "Special Cross Seal",
+    "Start",
+    "Tiger",
+    "Undo"
+  ],
+  "n_features": 126
+}

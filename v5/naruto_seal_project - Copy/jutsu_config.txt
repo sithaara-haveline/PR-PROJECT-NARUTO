@@ -1,0 +1,43 @@
+{
+  "_readme": "Edit this file, not the code. Seal names must match your model's class names EXACTLY (see model_metadata.json). Sequences are inspired by Naruto, not canonical - your validated seals decide what is possible. Control seals can NOT be used inside jutsu sequences.",
+
+  "controls": {
+    "start": "Start",
+    "undo": "Undo",
+    "cast": "Cast"
+  },
+
+  "idle_labels": ["Normal/Neutral", "Neutral"],
+
+  "timing": {
+    "hold_s": 0.7,
+    "min_conf": 0.6,
+    "dwell_s": 4.0,
+    "result_s": 6.0,
+    "timeout_s": 40.0,
+    "max_len": 8
+  },
+
+  "jutsu": [
+    {
+      "name": "Fireball Jutsu",
+      "seals": ["Ram", "Horse", "Boar"],
+      "theme": "fire"
+    },
+    {
+      "name": "Shadow Clone Jutsu",
+      "seals": ["Special Cross Seal"],
+      "theme": "smoke_clone"
+    },
+    {
+      "name": "Rasengan",
+      "seals": ["Horse", "Tiger"],
+      "theme": "spiral"
+    },
+    {
+      "name": "Reaper Death Seal",
+      "seals": ["Boar", "Tiger", "Hare", "Horse"],
+      "theme": "dark"
+    }
+  ]
+}

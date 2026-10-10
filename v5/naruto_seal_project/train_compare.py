@@ -106,6 +106,46 @@ def main():
     args = ap.parse_args()
 
     df = pd.read_csv(args.data)
+    controls = {"Start", "Undo", "Cast"}
+
+    summary = (
+        df.groupby("seal")
+        .agg(
+            Rows=("seal", "size"),
+            Sessions=("session_id", "nunique"),
+        )
+        .reset_index()
+        .rename(columns={"seal": "Class"})
+    )
+
+    summary.insert(
+        1,
+        "Role",
+        summary["Class"].map(
+            lambda name: "Control"
+            if name in controls
+            else "Neutral"
+            if name == "Normal/Neutral"
+            else "Seal"
+        ),
+    )
+
+    total = pd.DataFrame([{
+        "Class": "Total",
+        "Role": "",
+        "Rows": summary["Rows"].sum(),
+        "Sessions": summary["Sessions"].sum(),
+    }])
+    summary = pd.concat([summary, total], ignore_index=True)
+
+    # Print as a Markdown table
+    print("| Class | Role | Rows | Sessions |")
+    print("|---|---|---:|---:|")
+    for row in summary.itertuples(index=False):
+        print(f"| {row.Class} | {row.Role} | {row.Rows} | {row.Sessions} |")
+
+    summary.to_csv("class_summary.csv", index=False)
+
     X = df[feature_columns()].values
     y = df["seal"].values
     groups = df["session_id"].values

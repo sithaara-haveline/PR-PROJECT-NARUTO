@@ -1,0 +1,14 @@
+Class,Role,Rows,Sessions
+Boar,Seal,129,8
+Cast,Control,225,9
+Dog,Seal,300,12
+Hare,Seal,103,8
+Horse,Seal,208,9
+Normal/Neutral,Neutral,225,9
+Ram,Seal,173,9
+Rat,Seal,225,9
+Special Cross Seal,Seal,230,15
+Start,Control,225,9
+Tiger,Seal,225,9
+Undo,Control,225,9
+Total,,2493,115
